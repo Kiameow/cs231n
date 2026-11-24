@@ -299,13 +299,16 @@ class FullyConnectedNet(object):
 
         # every layers before the final one needs 2 cache, the final one needs 1 cache
         scores = X
-        layer_cache = []
-        for l in range(self.num_layers):
-            scores, affine_cache = affine_forward(scores, self.params[f'W{l+1}'], self.params[f'b{l+1}'])
-            layer_cache.append(affine_cache)
-            if l != self.num_layers-1:
-                scores, relu_cache = relu_forward(scores)
-                layer_cache.append(relu_cache)
+        caches = []
+        
+        # 1. 处理前 num_layers - 1 层（包含 Affine + ReLU）
+        for l in range(self.num_layers - 1):
+            scores, cache = affine_relu_forward(scores, self.params[f'W{l+1}'], self.params[f'b{l+1}'])
+            caches.append(cache)
+            
+        # 2. 处理最后一层（只有 Affine，没有 ReLU）
+        scores, cache = affine_forward(scores, self.params[f'W{self.num_layers}'], self.params[f'b{self.num_layers}'])
+        caches.append(cache)
 
         
         ############################################################################
@@ -332,17 +335,24 @@ class FullyConnectedNet(object):
         ############################################################################
         loss, downstream_grad = softmax_loss(scores, y)
 
+        # 正则化部分保持不变...
         loss_reg = 0
         for l in range(self.num_layers):
            loss_reg += np.sum(self.params[f'W{l+1}'] ** 2)
         loss += 0.5 * self.reg * loss_reg
 
+        # 1. 先反传最后一层（只有 Affine）
+        downstream_grad, grads[f'W{self.num_layers}'], grads[f'b{self.num_layers}'] = affine_backward(
+            downstream_grad, caches[-1]
+        )
 
-        for i in reversed(range(self.num_layers)):
-            if i != self.num_layers-1:
-                downstream_grad = relu_backward(downstream_grad, layer_cache[i*2+1])
-            downstream_grad, grads[f'W{i+1}'], grads[f'b{i+1}'] = affine_backward(downstream_grad, layer_cache[i*2])
+        # 2. 再反传前面的层（Affine + ReLU）
+        for i in reversed(range(self.num_layers - 1)):
+            downstream_grad, grads[f'W{i+1}'], grads[f'b{i+1}'] = affine_relu_backward(
+                downstream_grad, caches[i]
+            )
 
+        # 加上正则化梯度
         for i in range(self.num_layers):
             grads[f'W{i+1}'] += self.reg * self.params[f'W{i+1}']
         ############################################################################
