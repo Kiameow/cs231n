@@ -165,6 +165,10 @@ class FullyConnectedNet(object):
                 scores, cache = affine_bn_relu_forward(scores, self.params[f'W{l+1}'], self.params[f'b{l+1}'], self.bn_params[l])
             else:
                 scores, cache = affine_relu_forward(scores, self.params[f'W{l+1}'], self.params[f'b{l+1}'])
+
+            if self.use_dropout:
+                scores, dropout_cache = dropout_forward(scores, self.dropout_param)
+                cache = (cache, dropout_cache)
             caches.append(cache)
             
         # 2. 处理最后一层（只有 Affine，没有 ReLU）
@@ -207,13 +211,18 @@ class FullyConnectedNet(object):
 
         # 2. 再反传前面的层（Affine + ReLU）
         for i in reversed(range(self.num_layers - 1)):
+            cache = caches[i]
+            if self.use_dropout:
+                cache, dropout_cache = cache
+                downstream_grad = dropout_backward(downstream_grad, dropout_cache)
+
             if self.normalization == "batchnorm":
                 downstream_grad, grads[f'W{i+1}'], grads[f'b{i+1}'] = affine_bn_relu_backward(
-                    downstream_grad, caches[i]
+                    downstream_grad, cache
                 )
             else:
                 downstream_grad, grads[f'W{i+1}'], grads[f'b{i+1}'] = affine_relu_backward(
-                    downstream_grad, caches[i]
+                    downstream_grad, cache
                 )
 
         # 加上正则化梯度
